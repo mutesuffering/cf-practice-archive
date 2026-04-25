@@ -5,154 +5,221 @@ const fs = require('fs');
 /**
  * Problem: Codeforces 2045D
  * 
- * This solution uses a monotone stack to find nearest smaller values and
- * segment trees to maintain DP states over coordinate-compressed values.
+ * Optimized version for Node.js to avoid TLE.
+ * Uses Number (double precision) instead of BigInt for performance.
+ * Double precision is safe for values up to 2^53 (~9e15).
+ * Segment tree is implemented iteratively to avoid recursion overhead.
  */
 
 function solve() {
-    const input = fs.readFileSync(0, 'utf8').split(/\s+/);
-    if (input.length < 5) return;
-    
-    let inputIdx = 0;
-    const numPoints = parseInt(input[inputIdx++]);
-    const distance = parseInt(input[inputIdx++]);
-    const swimCost = parseInt(input[inputIdx++]);
-    const flyCost = parseInt(input[inputIdx++]);
-    const waitCost = parseInt(input[inputIdx++]);
-    
-    const points = new Float64Array(numPoints);
-    for (let i = 0; i < numPoints; i++) {
-        points[i] = parseInt(input[inputIdx++]);
+    const buffer = fs.readFileSync(0);
+    let offset = 0;
+
+    function nextString() {
+        while (offset < buffer.length && buffer[offset] <= 32) offset++;
+        let start = offset;
+        while (offset < buffer.length && buffer[offset] > 32) offset++;
+        return buffer.toString('utf8', start, offset);
     }
-    
-    // Calculate prefix sums of points
-    const prefixSums = new Float64Array(numPoints + 1);
-    prefixSums[0] = 0;
-    for (let i = 0; i < numPoints; i++) {
-        prefixSums[i + 1] = prefixSums[i] + points[i];
+
+    function nextInt() {
+        return parseInt(nextString());
     }
-    
-    // gValues[i] = prefixSums[i] - i * distance
-    const gValues = new Float64Array(numPoints + 1);
-    for (let i = 0; i <= numPoints; i++) {
-        gValues[i] = prefixSums[i] - i * distance;
+
+    const n = nextInt();
+    if (isNaN(n)) return;
+    const d = nextInt();
+    const swim_cost = nextInt();
+    const fly_cost = nextInt();
+    const wait_cost = nextInt();
+
+    if (fly_cost < swim_cost) {
+        process.stdout.write((n - 1) * fly_cost + "\n");
+        return;
     }
+
+    const points = new Float64Array(n);
+    for (let i = 0; i < n; i++) points[i] = nextInt();
+
+    const prefix_sums = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) {
+        prefix_sums[i + 1] = prefix_sums[i] + points[i] - d;
+    }
+
+    // Fast coordinate compression
+    const coords_raw = new Float64Array((n + 1) * 3 + 1);
+    let c_idx = 0;
+    for (let i = 0; i <= n; i++) {
+        coords_raw[c_idx++] = prefix_sums[i];
+        coords_raw[c_idx++] = prefix_sums[i] + d;
+        coords_raw[c_idx++] = prefix_sums[i] + 2 * d;
+    }
+    const INF = 1e15; // Sufficiently large for Number
+    coords_raw[c_idx++] = -INF;
     
-    // Use monotone stack to find the next index j such that gValues[j] < gValues[i]
-    const nextSmallerG = new Int32Array(numPoints + 1);
-    const stack = [];
-    for (let i = numPoints; i >= 0; i--) {
-        while (stack.length > 0 && gValues[stack[stack.length - 1]] >= gValues[i]) {
-            stack.pop();
+    const coords_sorted = coords_raw.subarray(0, c_idx).sort();
+    let unique_count = 0;
+    for (let i = 0; i < c_idx; i++) {
+        if (i === 0 || coords_sorted[i] !== coords_sorted[i - 1]) {
+            coords_sorted[unique_count++] = coords_sorted[i];
         }
-        if (stack.length === 0) nextSmallerG[i + 1] = numPoints + 1;
-        else nextSmallerG[i + 1] = stack[stack.length - 1];
-        stack.push(i);
     }
-    
-    // fValues[j] = prefixSums[j - 1] - j * distance
-    const fValues = new Float64Array(numPoints + 1);
-    for (let j = 1; j <= numPoints; j++) {
-        fValues[j] = prefixSums[j - 1] - j * distance;
-    }
-    
-    // Sort indices based on fValues for coordinate compression/segment tree
-    let sortedIndices = [];
-    for (let j = 1; j <= numPoints; j++) sortedIndices.push(j);
-    sortedIndices.sort((a, b) => fValues[a] - fValues[b]);
-    
-    const posInTree = new Int32Array(numPoints + 1);
-    for (let i = 0; i < numPoints; i++) posInTree[sortedIndices[i]] = i;
-    
-    // Binary search to find the index in sortedIndices
-    function getSortedIdx(val) {
-        let low = 0, high = numPoints - 1;
+    const coords = coords_sorted.subarray(0, unique_count);
+
+    function get_coord_index(x) {
+        let low = 0, high = unique_count - 1;
         while (low <= high) {
-            let mid = (low + high) >> 1;
-            if (fValues[sortedIndices[mid]] < val) low = mid + 1;
+            let mid = (low + high) >>> 1;
+            if (coords[mid] < x) low = mid + 1;
             else high = mid - 1;
         }
         return low;
     }
-    
-    // Segment trees for maintaining DP states
-    const tree1 = new Float64Array(2 * numPoints).fill(Infinity);
-    const tree2 = new Float64Array(2 * numPoints).fill(Infinity);
-    
-    function updateTree(tree, i, val) {
-        i += numPoints;
-        tree[i] = val;
-        while (i > 1) {
-            i >>= 1;
-            tree[i] = Math.min(tree[2 * i], tree[2 * i + 1]);
+
+    const TREE_SIZE = 1 << Math.ceil(Math.log2(unique_count));
+    const sum_tree = new Float64Array(TREE_SIZE * 2);
+    const min_prefix_tree = new Float64Array(TREE_SIZE * 2);
+
+    function update_tree(i, x) {
+        i += TREE_SIZE;
+        sum_tree[i] += x;
+        min_prefix_tree[i] += x;
+        for (i >>= 1; i > 0; i >>= 1) {
+            const left = i << 1;
+            const right = left | 1;
+            sum_tree[i] = sum_tree[left] + sum_tree[right];
+            const right_min = sum_tree[left] + min_prefix_tree[right];
+            min_prefix_tree[i] = min_prefix_tree[left] < right_min ? min_prefix_tree[left] : right_min;
         }
     }
-    
-    function queryTree(tree, l, r) {
-        let res = Infinity;
-        if (l >= r) return res;
-        for (l += numPoints, r += numPoints; l < r; l >>= 1, r >>= 1) {
-            if (l & 1) res = Math.min(res, tree[l++]);
-            if (r & 1) res = Math.min(res, tree[--r]);
-        }
-        return res;
-    }
-    
-    // Queues for moving DP states between trees
-    const moveFromTree1To2 = Array.from({length: numPoints + 2}, () => []);
-    const dp = new Float64Array(numPoints + 1).fill(Infinity);
-    
-    dp[1] = 0;
-    updateTree(tree1, posInTree[1], dp[1] - 1 * swimCost);
-    if (nextSmallerG[1] <= numPoints) moveFromTree1To2[nextSmallerG[1]].push(1);
 
-    for (let i = 2; i < numPoints; i++) {
-        for (let j of moveFromTree1To2[i-1]) {
-            updateTree(tree1, posInTree[j], Infinity);
-            updateTree(tree2, posInTree[j], dp[j] - j * swimCost - 2 * nextSmallerG[j] * waitCost);
+    // Iterative range query for prefix min structure
+    function query_min_prefix(l, r) {
+        let l_sum = 0, l_min = INF * 2;
+        let r_sum = 0, r_min = INF * 2;
+        
+        let ql = l + TREE_SIZE;
+        let qr = r + TREE_SIZE;
+        
+        // Iterative segment tree range query logic
+        const l_nodes = [];
+        const r_nodes = [];
+        
+        while (ql < qr) {
+            if (ql & 1) l_nodes.push(ql++);
+            if (qr & 1) r_nodes.push(--qr);
+            ql >>= 1;
+            qr >>= 1;
         }
         
-        const thresholdIdx = getSortedIdx(gValues[i-1] - 1 + 0.5);
-        const minVal1 = queryTree(tree1, 0, thresholdIdx);
-        const minVal2 = queryTree(tree2, 0, thresholdIdx);
+        let res_sum = 0;
+        let res_min = INF * 2;
         
-        dp[i] = Math.min(
-            minVal1 + (i - 1) * swimCost + flyCost,
-            minVal2 + (i - 1) * (swimCost + 2 * waitCost) + flyCost
-        );
+        // Merge from left to right
+        for (let i = 0; i < l_nodes.length; i++) {
+            const node = l_nodes[i];
+            const next_min = res_sum + min_prefix_tree[node];
+            if (min_prefix_tree[node] < res_min) {} // Placeholder for clear logic
+            res_min = Math.min(res_min, next_min);
+            res_sum += sum_tree[node];
+        }
+        for (let i = r_nodes.length - 1; i >= 0; i--) {
+            const node = r_nodes[i];
+            const next_min = res_sum + min_prefix_tree[node];
+            res_min = Math.min(res_min, next_min);
+            res_sum += sum_tree[node];
+        }
         
-        updateTree(tree1, posInTree[i], dp[i] - i * swimCost);
-        if (nextSmallerG[i] <= numPoints) moveFromTree1To2[nextSmallerG[i]].push(i);
-    }
-    
-    for (let j of moveFromTree1To2[numPoints - 1]) {
-        updateTree(tree1, posInTree[j], Infinity);
-        updateTree(tree2, posInTree[j], dp[j] - j * swimCost - 2 * nextSmallerG[j] * waitCost);
-    }
-
-    let minTotalCost = Infinity;
-    if (numPoints === 1) {
-        minTotalCost = 0;
-    } else {
-        // Final calculations for different end scenarios
-        const idxF1 = getSortedIdx(gValues[numPoints - 1] - 1 + 0.5);
-        minTotalCost = Math.min(minTotalCost, queryTree(tree1, 0, idxF1) + (numPoints - 1) * swimCost + flyCost);
-        minTotalCost = Math.min(minTotalCost, queryTree(tree2, 0, idxF1) + (numPoints - 1) * swimCost + 2 * (numPoints - 1) * waitCost + flyCost);
-        
-        const idxF2 = getSortedIdx(gValues[numPoints] + distance - 1 + 0.5);
-        minTotalCost = Math.min(minTotalCost, queryTree(tree1, 0, idxF2) + (numPoints - 1) * swimCost + 2 * waitCost + flyCost);
-        minTotalCost = Math.min(minTotalCost, queryTree(tree2, 0, idxF2) + (numPoints - 1) * swimCost + 2 * numPoints * waitCost + flyCost);
-
-        const idxS1 = getSortedIdx(gValues[numPoints - 1] - distance + 0.5);
-        minTotalCost = Math.min(minTotalCost, queryTree(tree1, 0, idxS1) + numPoints * swimCost);
-        minTotalCost = Math.min(minTotalCost, queryTree(tree2, 0, idxS1) + numPoints * swimCost + 2 * (numPoints - 1) * waitCost);
-        
-        const idxS2 = getSortedIdx(gValues[numPoints] + 0.5);
-        minTotalCost = Math.min(minTotalCost, queryTree(tree1, 0, idxS2) + numPoints * swimCost + 2 * waitCost);
-        minTotalCost = Math.min(minTotalCost, queryTree(tree2, 0, idxS2) + numPoints * swimCost + 2 * numPoints * waitCost);
+        return { sum: res_sum, min_prefix: res_min };
     }
 
-    process.stdout.write(minTotalCost.toFixed(0) + '\n');
+    // Faster iterative query that only returns min_prefix
+    function query_only_min(l, r) {
+        let ql = l + TREE_SIZE;
+        let qr = r + TREE_SIZE;
+        let l_idx = 0, r_idx = 0;
+        const l_stack = new Int32Array(64);
+        const r_stack = new Int32Array(64);
+        
+        while (ql < qr) {
+            if (ql & 1) l_stack[l_idx++] = ql++;
+            if (qr & 1) r_stack[r_idx++] = --qr;
+            ql >>= 1;
+            qr >>= 1;
+        }
+        
+        let res_sum = 0;
+        let res_min = INF * 2;
+        
+        for (let i = 0; i < l_idx; i++) {
+            const node = l_stack[i];
+            const node_min = res_sum + min_prefix_tree[node];
+            if (node_min < res_min) res_min = node_min;
+            res_sum += sum_tree[node];
+        }
+        for (let i = r_idx - 1; i >= 0; i--) {
+            const node = r_stack[i];
+            const node_min = res_sum + min_prefix_tree[node];
+            if (node_min < res_min) res_min = node_min;
+            res_sum += sum_tree[node];
+        }
+        return res_min;
+    }
+
+    function query_only_sum(l, r) {
+        let ql = l + TREE_SIZE;
+        let qr = r + TREE_SIZE;
+        let sum = 0;
+        while (ql < qr) {
+            if (ql & 1) sum += sum_tree[ql++];
+            if (qr & 1) sum += sum_tree[--qr];
+            ql >>= 1;
+            qr >>= 1;
+        }
+        return sum;
+    }
+
+    update_tree(0, INF);
+    update_tree(get_coord_index(0), -INF);
+    update_tree(get_coord_index(0) + 1, INF);
+
+    const dp = new Float64Array(n + 1);
+
+    for (let i = 1; i < n; i++) {
+        dp[i] = query_only_min(0, get_coord_index(prefix_sums[i] + d)) + (i - 1) * swim_cost + fly_cost;
+        
+        const swim_to_here = query_only_min(0, get_coord_index(prefix_sums[i] + d) + 1) + (i - 1) * swim_cost;
+        const fly_to_here = query_only_min(0, get_coord_index(prefix_sums[i] + 2 * d)) + (i - 2) * swim_cost + fly_cost;
+
+        const idx_p2 = get_coord_index(prefix_sums[i] + d);
+        const val_p2 = Math.min(swim_to_here, fly_to_here) - (i - 1) * swim_cost;
+        const current_p2 = query_only_sum(0, idx_p2 + 1);
+
+        if (val_p2 < current_p2) {
+            const diff = val_p2 - current_p2;
+            update_tree(idx_p2, diff);
+            update_tree(idx_p2 + 1, -diff);
+        }
+
+        const idx_pl = get_coord_index(prefix_sums[i]);
+        update_tree(idx_pl + 1, 2 * wait_cost);
+        
+        const val_pl = dp[i] - i * swim_cost;
+        const current_pl = query_only_sum(0, idx_pl + 1);
+
+        if (val_pl < current_pl) {
+            const diff = val_pl - current_pl;
+            update_tree(idx_pl, diff);
+            update_tree(idx_pl + 1, -diff);
+        }
+    }
+
+    const swim_to_end = query_only_min(0, get_coord_index(prefix_sums[n] + d) + 1) + (n - 1) * swim_cost;
+    const fly_to_end = query_only_min(0, get_coord_index(prefix_sums[n] + 2 * d)) + (n - 2) * swim_cost + fly_cost;
+
+    process.stdout.write(Math.min(swim_to_end, fly_to_end).toFixed(0) + "\n");
 }
 
 solve();
+
+
