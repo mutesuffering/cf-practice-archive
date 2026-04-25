@@ -50,8 +50,13 @@ python Python/<problem_id>.py < input.txt
 | **71A** | [Way Too Long Words](https://codeforces.com/problemset/problem/71/A) | JS |
 | **112A** | [Petya and Strings](https://codeforces.com/problemset/problem/112/A) | JS, PY |
 | **469A** | [I Wanna Be the Guy](https://codeforces.com/problemset/problem/469/A) | JS |
-| **2045D** | [The Dragon Archipelago](https://codeforces.com/contest/2045/problem/D) | C++, JS |
+| **1953A** | [HPC Summation](https://codeforces.com/problemset/problem/1953/A) | CPP, JS |
+| **2029E** | [Common Generator](https://codeforces.com/problemset/problem/2029/E) | CPP, JS |
+| **2045D** | [The Dragon Archipelago](https://codeforces.com/contest/2045/problem/D) | CPP, JS |
+| **2208A** | [Magic Board](https://codeforces.com/problemset/problem/2208/A) | JS |
 | **2218B** | (Specific Contest Problem) | JS |
+| **2218G** | [Awkward Seating](https://codeforces.com/contest/2218/problem/G) | JS |
+| **2222A** | [Nanatsukaze - Save Our Sound](https://codeforces.com/problemset/problem/2222/A) | JS |
 
 ---
 
