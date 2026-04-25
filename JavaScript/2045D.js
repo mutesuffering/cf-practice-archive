@@ -221,5 +221,3 @@ function solve() {
 }
 
 solve();
-
-
